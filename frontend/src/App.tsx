@@ -26,6 +26,21 @@ function delay(ms: number): Promise<void> {
   });
 }
 
+function getCampaignIdFromUrl(): string | null {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("campaign");
+}
+
+function setCampaignIdInUrl(campaignId: string | null): void {
+  const url = new URL(window.location.href);
+  if (campaignId) {
+    url.searchParams.set("campaign", campaignId);
+  } else {
+    url.searchParams.delete("campaign");
+  }
+  window.history.replaceState(null, "", url.toString());
+}
+
 function toOptimisticPledgedCampaign(campaign: Campaign, amount: number): Campaign {
   const nowInSeconds = Math.floor(Date.now() / 1000);
   const nextPledgedAmount = round(campaign.pledgedAmount + amount);
@@ -71,6 +86,11 @@ function App() {
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
+  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
+
+  useEffect(() => {
+    setCampaignIdInUrl(selectedCampaignId);
+  }, [selectedCampaignId]);
 
   async function refreshCampaigns(nextSelectedId?: string | null) {
     const data = await listCampaigns();
@@ -87,7 +107,6 @@ function App() {
       setHistory([]);
       return;
     }
-
     const data = await getCampaignHistory(campaignId);
     setHistory(data);
   }
@@ -103,6 +122,8 @@ function App() {
 
   useEffect(() => {
     async function bootstrap() {
+      const urlCampaignId = getCampaignIdFromUrl();
+
       const [campaignData, issueData] = await Promise.all([
         listCampaigns(),
         listOpenIssues(),
@@ -110,7 +131,20 @@ function App() {
 
       setCampaigns(campaignData);
       setIssues(issueData);
-      setSelectedCampaignId(campaignData[0]?.id ?? null);
+
+      if (urlCampaignId) {
+        const exists = campaignData.some((c) => c.id === urlCampaignId);
+        if (exists) {
+          setSelectedCampaignId(urlCampaignId);
+          setInvalidUrlCampaignId(null);
+        } else {
+          setInvalidUrlCampaignId(urlCampaignId);
+          const fallbackId = campaignData[0]?.id ?? null;
+          setSelectedCampaignId(fallbackId);
+        }
+      } else {
+        setSelectedCampaignId(campaignData[0]?.id ?? null);
+      }
     }
 
     void bootstrap();
@@ -118,29 +152,26 @@ function App() {
 
   useEffect(() => {
     setSelectedCampaignDetails(null);
-    void Promise.all([refreshHistory(selectedCampaignId), refreshSelectedCampaign(selectedCampaignId)]);
+    void Promise.all([
+      refreshHistory(selectedCampaignId),
+      refreshSelectedCampaign(selectedCampaignId),
+    ]);
   }, [selectedCampaignId]);
+
+  // ── derived state ────────────────────────────────────────────────────────
 
   const selectedCampaign = useMemo(() => {
     const baseCampaign =
       campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
-    if (!baseCampaign) {
-      return null;
-    }
-    if (selectedCampaignDetails?.id !== baseCampaign.id) {
-      return baseCampaign;
-    }
-    return {
-      ...baseCampaign,
-      pledges: selectedCampaignDetails.pledges,
-    };
+    if (!baseCampaign) return null;
+    if (selectedCampaignDetails?.id !== baseCampaign.id) return baseCampaign;
+    return { ...baseCampaign, pledges: selectedCampaignDetails.pledges };
   }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
 
   const metrics = useMemo(() => {
-    const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
-    const funded = campaigns.filter((campaign) => campaign.progress.status === "funded").length;
-    const pledged = campaigns.reduce((sum, campaign) => sum + campaign.pledgedAmount, 0);
-
+    const open = campaigns.filter((c) => c.progress.status === "open").length;
+    const funded = campaigns.filter((c) => c.progress.status === "funded").length;
+    const pledged = campaigns.reduce((sum, c) => sum + c.pledgedAmount, 0);
     return {
       total: campaigns.length,
       open,
@@ -148,6 +179,8 @@ function App() {
       pledged: Number(pledged.toFixed(2)),
     };
   }, [campaigns]);
+
+  // ── action handlers ──────────────────────────────────────────────────────
 
   async function handleCreate(payload: Parameters<typeof createCampaign>[0]) {
     setCreateError(null);
@@ -157,14 +190,23 @@ function App() {
     try {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
-      await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
+      await Promise.all([
+        refreshHistory(campaign.id),
+        refreshSelectedCampaign(campaign.id),
+      ]);
       setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create campaign.");
+      setCreateError(
+        error instanceof Error ? error.message : "Failed to create campaign.",
+      );
     }
   }
 
-  async function handlePledge(campaignId: string, contributor: string, amount: number) {
+  async function handlePledge(
+    campaignId: string,
+    contributor: string,
+    amount: number,
+  ) {
     setActionError(null);
     setActionMessage(null);
 
@@ -182,15 +224,13 @@ function App() {
       metadata: { pending: true },
     };
 
-    setCampaigns((currentCampaigns) =>
-      currentCampaigns.map((campaign) =>
-        campaign.id === campaignId ? toOptimisticPledgedCampaign(campaign, amount) : campaign,
+    setCampaigns((current) =>
+      current.map((c) =>
+        c.id === campaignId ? toOptimisticPledgedCampaign(c, amount) : c,
       ),
     );
-    setSelectedCampaignDetails((currentDetails) => {
-      if (!currentDetails || currentDetails.id !== campaignId) {
-        return currentDetails;
-      }
+    setSelectedCampaignDetails((current) => {
+      if (!current || current.id !== campaignId) return current;
       const optimisticPledge = {
         id: -Date.now(),
         campaignId,
@@ -199,13 +239,13 @@ function App() {
         createdAt: optimisticTimestamp,
       };
       return {
-        ...toOptimisticPledgedCampaign(currentDetails, amount),
-        pledges: [optimisticPledge, ...(currentDetails.pledges ?? [])],
+        ...toOptimisticPledgedCampaign(current, amount),
+        pledges: [optimisticPledge, ...(current.pledges ?? [])],
       };
     });
     setPendingPledgeCampaignId(campaignId);
     if (selectedCampaignId === campaignId) {
-      setHistory((currentHistory) => [optimisticEvent, ...currentHistory]);
+      setHistory((current) => [optimisticEvent, ...current]);
     }
     setActionMessage("Submitting pledge...");
 
@@ -215,26 +255,25 @@ function App() {
     try {
       await addPledge(campaignId, { contributor, amount });
       const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) {
-        await delay(minimumPendingMs - elapsedMs);
-      }
+      if (elapsedMs < minimumPendingMs) await delay(minimumPendingMs - elapsedMs);
       await refreshCampaigns(campaignId);
-      await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
+      await Promise.all([
+        refreshHistory(campaignId),
+        refreshSelectedCampaign(campaignId),
+      ]);
       setPendingPledgeCampaignId(null);
       setActionMessage("Pledge recorded in the local goal vault.");
     } catch (error) {
       const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) {
-        await delay(minimumPendingMs - elapsedMs);
-      }
+      if (elapsedMs < minimumPendingMs) await delay(minimumPendingMs - elapsedMs);
       setCampaigns(previousCampaigns);
       setSelectedCampaignDetails(previousSelectedDetails);
       await refreshSelectedCampaign(campaignId);
-      if (selectedCampaignId === campaignId) {
-        setHistory(previousHistory);
-      }
+      if (selectedCampaignId === campaignId) setHistory(previousHistory);
       setPendingPledgeCampaignId(null);
-      setActionError(error instanceof Error ? error.message : "Failed to add pledge.");
+      setActionError(
+        error instanceof Error ? error.message : "Failed to add pledge.",
+      );
       setActionMessage(null);
     }
   }
@@ -242,30 +281,47 @@ function App() {
   async function handleClaim(campaign: Campaign) {
     setActionError(null);
     setActionMessage(null);
-
     try {
       await claimCampaign(campaign.id, campaign.creator);
       await refreshCampaigns(campaign.id);
-      await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
+      await Promise.all([
+        refreshHistory(campaign.id),
+        refreshSelectedCampaign(campaign.id),
+      ]);
       setActionMessage("Campaign claimed successfully.");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to claim campaign.");
+      setActionError(
+        error instanceof Error ? error.message : "Failed to claim campaign.",
+      );
     }
   }
 
   async function handleRefund(campaignId: string, contributor: string) {
     setActionError(null);
     setActionMessage(null);
-
     try {
       await refundCampaign(campaignId, contributor);
       await refreshCampaigns(campaignId);
-      await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
+      await Promise.all([
+        refreshHistory(campaignId),
+        refreshSelectedCampaign(campaignId),
+      ]);
       setActionMessage("Refund recorded for the selected contributor.");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to refund contributor.");
+      setActionError(
+        error instanceof Error ? error.message : "Failed to refund contributor.",
+      );
     }
   }
+
+  /** Called when the user picks a campaign in the table. Clears any
+   *  "invalid link" banner since they are now navigating intentionally. */
+  function handleSelect(campaignId: string) {
+    setInvalidUrlCampaignId(null);
+    setSelectedCampaignId(campaignId);
+  }
+
+  // ── render ───────────────────────────────────────────────────────────────
 
   return (
     <div className="app-shell">
@@ -273,10 +329,28 @@ function App() {
         <p className="eyebrow">Soroban crowdfunding MVP</p>
         <h1>Stellar Goal Vault</h1>
         <p className="hero-copy">
-          Create funding goals, collect pledges, and model claim or refund flows before
-          wiring the full Soroban transaction path.
+          Create funding goals, collect pledges, and model claim or refund flows
+          before wiring the full Soroban transaction path.
         </p>
       </header>
+
+      {/* Invalid shared-link banner */}
+      {invalidUrlCampaignId && (
+        <div className="invalid-campaign-banner" role="alert">
+          <strong>Campaign not found.</strong> The link you followed referenced
+          campaign&nbsp;<code>{invalidUrlCampaignId}</code>, which doesn't exist or
+          may have been removed.
+          {campaigns.length > 0 && " Showing the first available campaign instead."}
+          <button
+            className="btn-ghost invalid-campaign-dismiss"
+            type="button"
+            onClick={() => setInvalidUrlCampaignId(null)}
+            aria-label="Dismiss"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <section className="metric-grid">
         <article className="metric-card">
@@ -313,7 +387,7 @@ function App() {
       <CampaignsTable
         campaigns={campaigns}
         selectedCampaignId={selectedCampaignId}
-        onSelect={setSelectedCampaignId}
+        onSelect={handleSelect}
       />
 
       <section className="secondary-grid">
