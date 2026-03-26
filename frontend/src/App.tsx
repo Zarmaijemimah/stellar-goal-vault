@@ -14,7 +14,7 @@ import {
   listOpenIssues,
   refundCampaign,
 } from "./services/api";
-import { Campaign, CampaignEvent, OpenIssue } from "./types/campaign";
+import { Campaign, CampaignEvent, OpenIssue, ApiError } from "./types/campaign";
 
 function round(value: number): number {
   return Number(value.toFixed(2));
@@ -67,8 +67,8 @@ function App() {
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
-  const [createError, setCreateError] = useState<string | null>(null);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<ApiError | null>(null);
+  const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(null);
 
@@ -160,7 +160,11 @@ function App() {
       await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
       setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
     } catch (error) {
-      setCreateError(error instanceof Error ? error.message : "Failed to create campaign.");
+      setCreateError({
+        message: error instanceof Error ? error.message : "Failed to create campaign.",
+        code: (error as any).code,
+        requestId: (error as any).requestId,
+      });
     }
   }
 
@@ -234,7 +238,11 @@ function App() {
         setHistory(previousHistory);
       }
       setPendingPledgeCampaignId(null);
-      setActionError(error instanceof Error ? error.message : "Failed to add pledge.");
+      setActionError({
+        message: error instanceof Error ? error.message : "Failed to add pledge.",
+        code: (error as any).code,
+        requestId: (error as any).requestId,
+      });
       setActionMessage(null);
     }
   }
@@ -249,7 +257,11 @@ function App() {
       await Promise.all([refreshHistory(campaign.id), refreshSelectedCampaign(campaign.id)]);
       setActionMessage("Campaign claimed successfully.");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to claim campaign.");
+      setActionError({
+        message: error instanceof Error ? error.message : "Failed to claim campaign.",
+        code: (error as any).code,
+        requestId: (error as any).requestId,
+      });
     }
   }
 
@@ -263,7 +275,11 @@ function App() {
       await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
       setActionMessage("Refund recorded for the selected contributor.");
     } catch (error) {
-      setActionError(error instanceof Error ? error.message : "Failed to refund contributor.");
+      setActionError({
+        message: error instanceof Error ? error.message : "Failed to refund contributor.",
+        code: (error as any).code,
+        requestId: (error as any).requestId,
+      });
     }
   }
 
