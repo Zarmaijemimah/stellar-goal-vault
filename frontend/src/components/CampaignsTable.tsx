@@ -1,12 +1,10 @@
-import { useState } from "react";
-import { Campaign } from "../types/campaign";
-import { AssetFilterDropdown } from "./AssetFilterDropdown";
-import { applyFilters, getDistinctAssetCodes } from "./campaignsTableUtils";
+
 
 interface CampaignsTableProps {
   campaigns: Campaign[];
   selectedCampaignId: string | null;
   onSelect: (campaignId: string) => void;
+  isLoading?: boolean;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -17,17 +15,20 @@ export function CampaignsTable({
   campaigns,
   selectedCampaignId,
   onSelect,
+  isLoading,
 }: CampaignsTableProps) {
-  const [selectedAssetCode, setSelectedAssetCode] = useState<string>("");
-  const selectedStatus = "";
 
-  const distinctAssetCodes = getDistinctAssetCodes(campaigns);
-  const filteredCampaigns = applyFilters(
-    campaigns,
-    selectedAssetCode,
-    selectedStatus,
-  );
-  const isEmpty = campaigns.length === 0;
+
+  if (campaigns.length === 0) {
+    return (
+      <EmptyState
+        variant="card"
+        icon={LayoutGrid}
+        title="Campaign board"
+        message="No campaigns yet. Create the first vault to make this board active."
+      />
+    );
+  }
 
   return (
     <section className="card">

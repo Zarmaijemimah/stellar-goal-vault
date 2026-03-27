@@ -1,3 +1,4 @@
+import { z } from "zod";
 import { config } from "../config";
 import { z } from "zod";
 
@@ -22,7 +23,7 @@ export const assetCodeSchema = z
   .string()
   .trim()
   .regex(ASSET_CODE_REGEX, "Asset code must be 1-12 alphanumeric characters.")
-  .transform((value) => value.toUpperCase())
+  .transform((value: string) => value.toUpperCase())
   .refine(
     (code: string) => config.allowedAssets.includes(code),
     {

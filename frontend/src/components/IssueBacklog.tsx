@@ -1,10 +1,12 @@
+import { ListTodo } from "lucide-react";
 import { OpenIssue } from "../types/campaign";
+import { EmptyState } from "./EmptyState";
 
 interface IssueBacklogProps {
   issues: OpenIssue[];
+  isLoading?: boolean;
 }
-
-export function IssueBacklog({ issues }: IssueBacklogProps) {
+export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
   return (
     <section className="card">
       <div className="section-heading">
@@ -13,23 +15,26 @@ export function IssueBacklog({ issues }: IssueBacklogProps) {
       </div>
 
       <div className="issue-list">
-        {issues.map((issue) => (
-          <article key={issue.id} className="issue-item">
-            <div className="issue-topline">
-              <strong>{issue.title}</strong>
-              <span className="badge badge-neutral">{issue.points} pts</span>
-            </div>
-            <p>{issue.summary}</p>
-            <div className="chip-row">
-              {issue.labels.map((label) => (
-                <span key={label} className="chip">
-                  {label}
-                </span>
-              ))}
-              <span className="chip-emphasis">{issue.complexity}</span>
-            </div>
-          </article>
-        ))}
+
+        ) : (
+          issues.map((issue) => (
+            <article key={issue.id} className="issue-item">
+              <div className="issue-topline">
+                <strong>{issue.title}</strong>
+                <span className="badge badge-neutral">{issue.points} pts</span>
+              </div>
+              <p>{issue.summary}</p>
+              <div className="chip-row">
+                {issue.labels.map((label) => (
+                  <span key={label} className="chip">
+                    {label}
+                  </span>
+                ))}
+                <span className="chip-emphasis">{issue.complexity}</span>
+              </div>
+            </article>
+          ))
+        )}
       </div>
     </section>
   );
