@@ -36,7 +36,12 @@ const port = Number(process.env.PORT ?? 3001);
 initCampaignStore();
 startEventIndexer();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: config.corsAllowedOrigins,
+    credentials: true,
+  })
+);
 app.use(express.json());
 
 // Request ID middleware
