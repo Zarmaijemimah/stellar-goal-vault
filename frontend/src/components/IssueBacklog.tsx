@@ -4,9 +4,9 @@ import { EmptyState } from "./EmptyState";
 
 interface IssueBacklogProps {
   issues: OpenIssue[];
+  isLoading?: boolean;
 }
-
-export function IssueBacklog({ issues }: IssueBacklogProps) {
+export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
   return (
     <section className="card">
       <div className="section-heading">
@@ -15,11 +15,7 @@ export function IssueBacklog({ issues }: IssueBacklogProps) {
       </div>
 
       <div className="issue-list">
-        {issues.length === 0 ? (
-          <EmptyState
-            icon={ListTodo}
-            message="No pending issues in the backlog."
-          />
+
         ) : (
           issues.map((issue) => (
             <article key={issue.id} className="issue-item">

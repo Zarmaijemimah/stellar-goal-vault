@@ -4,6 +4,7 @@ import { EmptyState } from "./EmptyState";
 
 interface CampaignTimelineProps {
   history: CampaignEvent[];
+  isLoading?: boolean;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -25,7 +26,7 @@ function describeEvent(event: CampaignEvent): string {
   }
 }
 
-export function CampaignTimeline({ history }: CampaignTimelineProps) {
+export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) {
   return (
     <section className="card">
       <div className="section-heading">
@@ -33,11 +34,7 @@ export function CampaignTimeline({ history }: CampaignTimelineProps) {
         <p className="muted">Each action is stored locally so contributors can follow campaign activity.</p>
       </div>
 
-      {history.length === 0 ? (
-        <EmptyState
-          icon={History}
-          message="Select a campaign to see lifecycle events."
-        />
+
       ) : (
         <div className="timeline">
           {history.map((event) => {
