@@ -41,6 +41,18 @@ function setCampaignIdInUrl(campaignId: string | null): void {
   window.history.replaceState(null, "", url.toString());
 }
 
+function getStatusFromUrl(): string {
+  const params = new URLSearchParams(window.location.search);
+  return params.get("status") ?? "all";
+}
+
+function setStatusInUrl(status: string) {
+  const url = new URL(window.location.href);
+  if (status && status !== "all") url.searchParams.set("status", status);
+  else url.searchParams.delete("status");
+  window.history.replaceState(null, "", url.toString());
+}
+
 function toOptimisticPledgedCampaign(campaign: Campaign, amount: number): Campaign {
   const nowInSeconds = Math.floor(Date.now() / 1000);
   const nextPledgedAmount = round(campaign.pledgedAmount + amount);
@@ -83,6 +95,7 @@ function App() {
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
+  const [selectedStatus, setSelectedStatus] = useState<string>(getStatusFromUrl());
   const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null);
   const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(null);
   const [createError, setCreateError] = useState<ApiError | null>(null);
@@ -120,6 +133,17 @@ function App() {
       return;
     }
 
+    const startedAt = Date.now();
+    setIsSelectedLoading(true);
+    try {
+      const data = await getCampaignHistory(campaignId);
+      setHistory(data);
+    } finally {
+      const elapsed = Date.now() - startedAt;
+      const minMs = 200;
+      if (elapsed < minMs) await delay(minMs - elapsed);
+      setIsSelectedLoading(false);
+    }
   }
 
   async function refreshSelectedCampaign(campaignId: string | null) {
@@ -142,12 +166,34 @@ function App() {
 
   useEffect(() => {
     async function bootstrap() {
+      const startedAt = Date.now();
+      setIsCampaignsLoading(true);
+      try {
+        const [campaignData, issueData] = await Promise.all([
+          listCampaigns(),
+          listOpenIssues(),
+        ]);
 
+        setCampaigns(campaignData);
+        setIssues(issueData);
+        setSelectedCampaignId(campaignData[0]?.id ?? null);
+      } finally {
+        const elapsed = Date.now() - startedAt;
+        const minMs = 350;
+        if (elapsed < minMs) await delay(minMs - elapsed);
+        setIsCampaignsLoading(false);
+        setInitialLoad(false);
       }
     }
 
     void bootstrap();
   }, []);
+
+  useEffect(() => {
+    // keep URL in sync when user changes filter
+    setStatusInUrl(selectedStatus);
+  }, [selectedStatus]);
+
 
   useEffect(() => {
     setSelectedCampaignDetails(null);
@@ -312,6 +358,10 @@ function App() {
     setSelectedCampaignId(campaignId);
   }
 
+  function handleStatusChange(status: string) {
+    setSelectedStatus(status);
+  }
+
   // ── render ───────────────────────────────────────────────────────────────
 
   return (
@@ -325,7 +375,7 @@ function App() {
         </p>
       </header>
 
-
+      <section className="metrics-grid">
         <article className="metric-card">
           <span>Total campaigns</span>
           <strong>{metrics.total}</strong>
@@ -358,7 +408,18 @@ function App() {
         />
       </section>
 
+      <CampaignsTable
+        campaigns={campaigns}
+        isLoading={isCampaignsLoading || initialLoad}
+        selectedCampaignId={selectedCampaignId}
+        onSelect={handleSelect}
+        selectedStatus={selectedStatus}
+        onStatusChange={handleStatusChange}
+      />
 
+      <section className="secondary-grid">
+        <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
+        <IssueBacklog issues={issues} isLoading={isSelectedLoading || initialLoad} />
       </section>
     </div>
   );

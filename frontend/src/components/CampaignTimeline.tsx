@@ -35,6 +35,25 @@ export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) 
       </div>
 
 
+      {isLoading ? (
+        <div className="timeline">
+          {Array.from({ length: 4 }).map((_, idx) => (
+            <article key={idx} className="timeline-item">
+              <div className="timeline-dot" aria-hidden />
+              <div className="timeline-copy">
+                <div className="skeleton skeleton-line" style={{ width: 160 }} />
+                <div className="skeleton skeleton-line" style={{ width: 100, height: 12 }} />
+              </div>
+            </article>
+          ))}
+        </div>
+      ) : history.length === 0 ? (
+        <EmptyState
+          variant="inline"
+          icon={History}
+          title="No activity yet"
+          message="Select a campaign to see lifecycle events."
+        />
       ) : (
         <div className="timeline">
           {history.map((event) => {
