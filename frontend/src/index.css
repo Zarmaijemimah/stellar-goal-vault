@@ -658,6 +658,19 @@ tbody tr:hover td {
   gap: 16px;
 }
 
+/* More responsive layout for board controls with search and filter */
+.board-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  align-items: center;
+}
+
+.board-controls > * {
+  flex: 1 1 auto;
+  min-width: 200px;
+}
+
 .stacked {
   display: grid;
   gap: 4px;

@@ -3,7 +3,9 @@ import { LayoutGrid } from "lucide-react";
 import { Campaign } from "../types/campaign";
 import { AssetFilterDropdown } from "./AssetFilterDropdown";
 import { EmptyState } from "./EmptyState";
+import { SearchInput } from "./SearchInput";
 import { applyFilters, getDistinctAssetCodes } from "./campaignsTableUtils";
+import { useDebounce } from "../hooks/useDebounce";
 
 interface CampaignsTableProps {
   campaigns: Campaign[];
@@ -23,10 +25,13 @@ export function CampaignsTable({
   isLoading = false,
 }: CampaignsTableProps) {
   const [selectedAssetCode, setSelectedAssetCode] = useState("");
+  const [searchInput, setSearchInput] = useState("");
+  const debouncedSearchQuery = useDebounce(searchInput, 300);
+
   const distinctAssetCodes = useMemo(() => getDistinctAssetCodes(campaigns), [campaigns]);
   const filteredCampaigns = useMemo(
-    () => applyFilters(campaigns, selectedAssetCode, ""),
-    [campaigns, selectedAssetCode],
+    () => applyFilters(campaigns, selectedAssetCode, "", debouncedSearchQuery),
+    [campaigns, selectedAssetCode, debouncedSearchQuery],
   );
 
   if (isLoading) {
@@ -61,6 +66,12 @@ export function CampaignsTable({
       </div>
 
       <div className="board-controls">
+        <SearchInput
+          value={searchInput}
+          onChange={setSearchInput}
+          disabled={campaigns.length === 0}
+          placeholder="Search by title, creator, or ID..."
+        />
         <AssetFilterDropdown
           options={distinctAssetCodes}
           value={selectedAssetCode}
@@ -70,7 +81,11 @@ export function CampaignsTable({
       </div>
 
       {filteredCampaigns.length === 0 ? (
-        <p className="muted">No campaigns match the current asset filter.</p>
+        <p className="muted">
+          {searchInput.trim() !== "" || selectedAssetCode !== ""
+            ? "No campaigns match your search or filter."
+            : "No campaigns available."}
+        </p>
       ) : (
         <div className="table-wrap">
           <table>
