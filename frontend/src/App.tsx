@@ -5,6 +5,7 @@ import { CampaignTimeline } from "./components/CampaignTimeline";
 import { CreateCampaignForm } from "./components/CreateCampaignForm";
 import { IssueBacklog } from "./components/IssueBacklog";
 import {
+  addPledge,
   claimCampaign,
   createCampaign,
   getAppConfig,
@@ -15,17 +16,24 @@ import {
   reconcilePledge,
   refundCampaign,
 } from "./services/api";
+import {
+  connectFreighterWallet,
+  submitFreighterClaim,
+  submitFreighterPledge,
+} from "./services/freighter";
 import { submitRefundTransaction } from "./services/soroban";
-import { ApiError, Campaign, CampaignEvent, OpenIssue } from "./types/campaign";
+import {
+  ApiError,
+  AppConfig,
+  Campaign,
+  CampaignEvent,
+  OpenIssue,
+} from "./types/campaign";
+
+const DEFAULT_NETWORK_PASSPHRASE = "Test SDF Network ; September 2015";
 
 function round(value: number): number {
   return Number(value.toFixed(2));
-}
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
 }
 
 function getCampaignIdFromUrl(): string | null {
@@ -43,42 +51,27 @@ function setCampaignIdInUrl(campaignId: string | null): void {
   window.history.replaceState(null, "", url.toString());
 }
 
+function toApiError(error: unknown): ApiError {
+  if (error && typeof error === "object") {
+    const maybeError = error as Error & {
+      code?: string;
+      details?: Array<{ field: string; message: string }>;
+      requestId?: string;
+    };
 
-}
+    return {
+      message: maybeError.message || "Something went wrong.",
+      code: maybeError.code,
+      details: maybeError.details,
+      requestId: maybeError.requestId,
+    };
+  }
 
-function toOptimisticPledgedCampaign(campaign: Campaign, amount: number): Campaign {
-  const nowInSeconds = Math.floor(Date.now() / 1000);
-  const nextPledgedAmount = round(campaign.pledgedAmount + amount);
-  const deadlineReached = nowInSeconds >= campaign.deadline;
-  const status =
-    campaign.claimedAt !== undefined
-      ? "claimed"
-      : nextPledgedAmount >= campaign.targetAmount
-        ? "funded"
-        : deadlineReached
-          ? "failed"
-          : "open";
+  if (typeof error === "string") {
+    return { message: error };
+  }
 
-  return {
-    ...campaign,
-    pledgedAmount: nextPledgedAmount,
-    progress: {
-      ...campaign.progress,
-      status,
-      percentFunded: round((nextPledgedAmount / campaign.targetAmount) * 100),
-      remainingAmount: round(Math.max(0, campaign.targetAmount - nextPledgedAmount)),
-      pledgeCount: campaign.progress.pledgeCount + 1,
-      canPledge: campaign.claimedAt === undefined && !deadlineReached,
-      canClaim:
-        campaign.claimedAt === undefined &&
-        deadlineReached &&
-        nextPledgedAmount >= campaign.targetAmount,
-      canRefund:
-        campaign.claimedAt === undefined &&
-        deadlineReached &&
-        nextPledgedAmount < campaign.targetAmount,
-    },
-  };
+  return { message: "Something went wrong." };
 }
 
 function App() {
@@ -86,20 +79,23 @@ function App() {
   const [issues, setIssues] = useState<OpenIssue[]>([]);
   const [history, setHistory] = useState<CampaignEvent[]>([]);
   const [appConfig, setAppConfig] = useState<AppConfig | null>(null);
+  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(() =>
+    getCampaignIdFromUrl(),
+  );
+  const [selectedCampaignDetails, setSelectedCampaignDetails] = useState<Campaign | null>(
+    null,
+  );
   const [isCampaignsLoading, setIsCampaignsLoading] = useState(false);
   const [isIssuesLoading, setIsIssuesLoading] = useState(false);
   const [isSelectedLoading, setIsSelectedLoading] = useState(false);
   const [initialLoad, setInitialLoad] = useState(true);
-
   const [createError, setCreateError] = useState<ApiError | null>(null);
   const [actionError, setActionError] = useState<ApiError | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<
-    string | null
-  >(null);
-  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<
-    string | null
-  >(null);
+  const [pendingPledgeCampaignId, setPendingPledgeCampaignId] = useState<string | null>(
+    null,
+  );
+  const [invalidUrlCampaignId, setInvalidUrlCampaignId] = useState<string | null>(null);
   const [connectedWallet, setConnectedWallet] = useState<string | null>(null);
   const [isConnectingWallet, setIsConnectingWallet] = useState(false);
 
@@ -108,35 +104,24 @@ function App() {
   }, [selectedCampaignId]);
 
   async function refreshCampaigns(nextSelectedId?: string | null) {
-    const startedAt = Date.now();
     setIsCampaignsLoading(true);
-
     try {
       const data = await listCampaigns();
       setCampaigns(data);
 
-      const candidateId =
-        nextSelectedId ?? selectedCampaignId ?? (data.length > 0 ? data[0].id : null);
-      const exists = candidateId ? data.some((campaign) => campaign.id === candidateId) : false;
+      const requestedId = nextSelectedId ?? selectedCampaignId;
+      const nextId = requestedId ?? data[0]?.id ?? null;
+      const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
+      const resolvedId = exists ? nextId : data[0]?.id ?? null;
 
-      if (nextSelectedId && !exists) {
-        setInvalidUrlCampaignId(nextSelectedId);
-      } else {
-        setInvalidUrlCampaignId(null);
+      setInvalidUrlCampaignId(requestedId && !exists ? requestedId : null);
+      setSelectedCampaignId(resolvedId);
+
+      if (!resolvedId) {
+        setSelectedCampaignDetails(null);
+        setHistory([]);
       }
-
-      setSelectedCampaignId(exists ? candidateId : data[0]?.id ?? null);
-    } catch (error) {
-      console.error("Failed to refresh campaigns:", error);
-      setActionError(
-        error instanceof Error ? { message: error.message } : { message: "Failed to load campaigns" }
-      );
     } finally {
-      const elapsed = Date.now() - startedAt;
-      const minMs = 300;
-      if (elapsed < minMs) {
-        await delay(minMs - elapsed);
-      }
       setIsCampaignsLoading(false);
     }
   }
@@ -147,7 +132,8 @@ function App() {
       return;
     }
 
-
+    const data = await getCampaignHistory(campaignId);
+    setHistory(data);
   }
 
   async function refreshSelectedCampaign(campaignId: string | null) {
@@ -156,33 +142,71 @@ function App() {
       return;
     }
 
-    const startedAt = Date.now();
     setIsSelectedLoading(true);
     try {
       const campaign = await getCampaign(campaignId);
       setSelectedCampaignDetails(campaign);
-    } catch (error) {
-      console.error("Failed to load campaign details:", error);
-      setActionError(
-        error instanceof Error ? { message: error.message } : { message: "Failed to load campaign details" }
-      );
     } finally {
-      const elapsed = Date.now() - startedAt;
-      const minMs = 200;
-      if (elapsed < minMs) {
-        await delay(minMs - elapsed);
-      }
       setIsSelectedLoading(false);
     }
   }
 
-  // FIX: bootstrap was a nested function with a stray closing brace that
-  // made everything below it fall outside the component's scope.
-  useEffect(() => {
-    async function bootstrap() {
+  async function refreshIssues() {
+    setIsIssuesLoading(true);
+    try {
+      const data = await listOpenIssues();
+      setIssues(data);
+    } finally {
+      setIsIssuesLoading(false);
+    }
+  }
 
-        setInitialLoad(false);
+  async function refreshSelectedData(campaignId: string | null) {
+    await Promise.all([refreshHistory(campaignId), refreshSelectedCampaign(campaignId)]);
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function bootstrap() {
+      const requestedCampaignId = getCampaignIdFromUrl();
+      setInitialLoad(true);
+
+      const [configResult, issuesResult, campaignsResult] = await Promise.allSettled([
+        getAppConfig(),
+        listOpenIssues(),
+        listCampaigns(),
+      ]);
+
+      if (cancelled) {
+        return;
       }
+
+      if (configResult.status === "fulfilled") {
+        setAppConfig(configResult.value);
+      } else {
+        setActionError(toApiError(configResult.reason));
+      }
+
+      if (issuesResult.status === "fulfilled") {
+        setIssues(issuesResult.value);
+      }
+
+      if (campaignsResult.status === "fulfilled") {
+        const data = campaignsResult.value;
+        setCampaigns(data);
+
+        const nextId = requestedCampaignId ?? data[0]?.id ?? null;
+        const exists = nextId ? data.some((campaign) => campaign.id === nextId) : false;
+        const resolvedId = exists ? nextId : data[0]?.id ?? null;
+
+        setInvalidUrlCampaignId(requestedCampaignId && !exists ? requestedCampaignId : null);
+        setSelectedCampaignId(resolvedId);
+      } else {
+        setActionError(toApiError(campaignsResult.reason));
+      }
+
+      setInitialLoad(false);
     }
 
     void bootstrap();
@@ -193,43 +217,42 @@ function App() {
   }, []);
 
   useEffect(() => {
-
-    setSelectedCampaignDetails(null);
-    void Promise.all([
-      refreshHistory(selectedCampaignId).catch((error) =>
-        setActionError(toApiError(error)),
-      ),
-      refreshSelectedCampaign(selectedCampaignId).catch((error) =>
-        setActionError(toApiError(error)),
-      ),
-    ]);
+    void refreshSelectedData(selectedCampaignId).catch((error) => {
+      setActionError(toApiError(error));
+    });
   }, [selectedCampaignId]);
 
   const selectedCampaign = useMemo(() => {
-    const baseCampaign =
+    const summaryCampaign =
       campaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null;
 
-    if (!baseCampaign) {
-      return null;
+    if (!summaryCampaign) {
+      return selectedCampaignDetails;
     }
 
-    if (selectedCampaignDetails?.id !== baseCampaign.id) {
-      return baseCampaign;
+    if (!selectedCampaignDetails || selectedCampaignDetails.id !== summaryCampaign.id) {
+      return summaryCampaign;
     }
 
-    return { ...baseCampaign, pledges: selectedCampaignDetails.pledges };
+    return {
+      ...summaryCampaign,
+      pledges: selectedCampaignDetails.pledges,
+      metadata: selectedCampaignDetails.metadata ?? summaryCampaign.metadata,
+    };
   }, [campaigns, selectedCampaignDetails, selectedCampaignId]);
 
   const metrics = useMemo(() => {
-    const open = campaigns.filter((c) => c.progress.status === "open").length;
-    const funded = campaigns.filter((c) => c.progress.status === "funded").length;
-    const pledged = campaigns.reduce((sum, c) => sum + c.pledgedAmount, 0);
+    const open = campaigns.filter((campaign) => campaign.progress.status === "open").length;
+    const funded = campaigns.filter((campaign) => campaign.progress.status === "funded").length;
+    const claimed = campaigns.filter((campaign) => campaign.progress.status === "claimed").length;
+    const pledged = campaigns.reduce((sum, campaign) => sum + campaign.pledgedAmount, 0);
 
     return {
       total: campaigns.length,
       open,
       funded,
-      pledged: Number(pledged.toFixed(2)),
+      claimed,
+      pledged: round(pledged),
     };
   }, [campaigns]);
 
@@ -241,25 +264,22 @@ function App() {
     try {
       const campaign = await createCampaign(payload);
       await refreshCampaigns(campaign.id);
-      await Promise.all([
-        refreshHistory(campaign.id),
-        refreshSelectedCampaign(campaign.id),
-      ]);
-      setActionMessage(
-        `Campaign #${campaign.id} is live and ready for pledges.`,
-      );
+      await refreshSelectedData(campaign.id);
+      setActionMessage(`Campaign #${campaign.id} is live and ready for pledges.`);
     } catch (error) {
-
+      setCreateError(toApiError(error));
     }
   }
 
-  async function handlePledge(campaignId: string, contributor: string, amount: number) {
+  async function handleConnectWallet() {
     setActionError(null);
     setActionMessage(null);
     setIsConnectingWallet(true);
 
     try {
-      const wallet = await connectFreighterWallet(appConfig.networkPassphrase);
+      const wallet = await connectFreighterWallet(
+        appConfig?.networkPassphrase ?? DEFAULT_NETWORK_PASSPHRASE,
+      );
       setConnectedWallet(wallet.publicKey);
       setActionMessage(`Connected wallet ${wallet.publicKey}.`);
     } catch (error) {
@@ -270,110 +290,60 @@ function App() {
   }
 
   async function handlePledge(campaignId: string, amount: number) {
-    if (!appConfig) {
-      setActionError({ message: "The app configuration is still loading." });
-      return;
-    }
-
     if (!connectedWallet) {
       setActionError({
-        message: "Connect Freighter before submitting an on-chain pledge.",
+        message: "Connect Freighter before submitting a pledge.",
         code: "WALLET_REQUIRED",
       });
       return;
     }
 
     setActionError(null);
-    setActionMessage("Simulating pledge transaction...");
-    // Snapshot state so we can rollback on failure while providing
-    // a minimum visible pending duration for the UI.
-    const pendingStartedAt = Date.now();
-    const minimumPendingMs = 300;
-    const previousCampaigns = campaigns;
-    const previousSelectedDetails = selectedCampaignDetails;
-    const previousHistory = history;
+    setActionMessage(null);
     setPendingPledgeCampaignId(campaignId);
-
-    setCampaigns((current) =>
-      current.map((campaign) =>
-        campaign.id === campaignId ? toOptimisticPledgedCampaign(campaign, amount) : campaign,
-      ),
-    );
-
-    setSelectedCampaignDetails((current) => {
-      if (!current || current.id !== campaignId) {
-        return current;
-      }
-
-      const optimisticPledge = {
-        id: -Date.now(),
-        campaignId,
-        contributor: connectedWallet,
-        amount,
-        createdAt: optimisticTimestamp,
-      };
-
-      return {
-        ...toOptimisticPledgedCampaign(current, amount),
-        pledges: [optimisticPledge, ...(current.pledges ?? [])],
-      };
-    });
-
-    setPendingPledgeCampaignId(campaignId);
-    if (selectedCampaignId === campaignId) {
-      setHistory((current) => [optimisticEvent, ...current]);
-    }
-
-    setActionMessage("Submitting pledge...");
-
-      setActionMessage(
-        `Transaction confirmed on-chain. Reconciling local campaign state for ${transactionResult.transactionHash}...`,
-      );
-
-      await reconcilePledge(campaignId, {
-        contributor: connectedWallet,
-        amount,
-        transactionHash: transactionResult.transactionHash,
-        confirmedAt: transactionResult.confirmedAt,
-      });
 
     try {
-      await addPledge(campaignId, { contributor, amount });
+      if (appConfig?.walletIntegrationReady && appConfig.contractId && appConfig.sorobanRpcUrl) {
+        setActionMessage("Submitting pledge to Soroban...");
+        const transactionResult = await submitFreighterPledge({
+          campaignId,
+          contributor: connectedWallet,
+          amount,
+          config: appConfig,
+        });
 
-      const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) {
-        await delay(minimumPendingMs - elapsedMs);
+        await reconcilePledge(campaignId, {
+          contributor: connectedWallet,
+          amount,
+          transactionHash: transactionResult.transactionHash,
+          confirmedAt: transactionResult.confirmedAt,
+        });
+
+        setActionMessage("Pledge confirmed on-chain and reconciled locally.");
+      } else {
+        setActionMessage(
+          "Wallet signing is not configured on the backend yet. Recording the pledge locally.",
+        );
+        await addPledge(campaignId, { contributor: connectedWallet, amount });
+        setActionMessage("Pledge recorded in the local goal vault.");
       }
 
       await refreshCampaigns(campaignId);
-      await Promise.all([
-        refreshHistory(campaignId),
-        refreshSelectedCampaign(campaignId),
-      ]);
-
-      setPendingPledgeCampaignId(null);
-      setActionMessage("Pledge recorded in the local goal vault.");
+      await refreshSelectedData(campaignId);
     } catch (error) {
-      const elapsedMs = Date.now() - pendingStartedAt;
-      if (elapsedMs < minimumPendingMs) {
-        await delay(minimumPendingMs - elapsedMs);
-      }
-
-      setCampaigns(previousCampaigns);
-      setSelectedCampaignDetails(previousSelectedDetails);
-      if (selectedCampaignId === campaignId) {
-        setHistory(previousHistory);
-      }
-
-
-      setActionMessage(null);
       setActionError(toApiError(error));
+      setActionMessage(null);
+    } finally {
+      setPendingPledgeCampaignId(null);
     }
   }
 
   async function handleClaim(campaign: Campaign) {
-    if (!appConfig) {
-      setActionError({ message: "The app configuration is still loading." });
+    if (!appConfig?.walletIntegrationReady) {
+      setActionError({
+        message: "Wallet signing is not configured on the backend yet.",
+        code: "CONFIG_MISSING",
+      });
       return;
     }
 
@@ -387,15 +357,14 @@ function App() {
 
     if (connectedWallet !== campaign.creator) {
       setActionError({
-        message:
-          "Only the campaign creator can claim funds. Connect the creator wallet.",
+        message: "Only the campaign creator can claim funds.",
         code: "FORBIDDEN",
       });
       return;
     }
 
     setActionError(null);
-    setActionMessage(null);
+    setActionMessage("Submitting claim to Soroban...");
 
     try {
       const transactionResult = await submitFreighterClaim({
@@ -403,10 +372,6 @@ function App() {
         creator: connectedWallet,
         config: appConfig,
       });
-
-      setActionMessage(
-        `Claim confirmed on-chain. Reconciling local state for ${transactionResult.transactionHash}...`,
-      );
 
       await claimCampaign(
         campaign.id,
@@ -416,13 +381,11 @@ function App() {
       );
 
       await refreshCampaigns(campaign.id);
-      await Promise.all([
-        refreshHistory(campaign.id),
-        refreshSelectedCampaign(campaign.id),
-      ]);
+      await refreshSelectedData(campaign.id);
       setActionMessage("Campaign claimed successfully.");
     } catch (error) {
-
+      setActionError(toApiError(error));
+      setActionMessage(null);
     }
   }
 
@@ -432,15 +395,13 @@ function App() {
 
     try {
       const sorobanReceipt = await submitRefundTransaction(campaignId, contributor);
-      setActionMessage("Soroban refund confirmed. Reconciling local history...");
-
       await refundCampaign(campaignId, contributor, sorobanReceipt);
       await refreshCampaigns(campaignId);
-      await Promise.all([
-        refreshHistory(campaignId),
-        refreshSelectedCampaign(campaignId),
-      ]);
-
+      await refreshSelectedData(campaignId);
+      setActionMessage("Contributor refunded successfully.");
+    } catch (error) {
+      setActionError(toApiError(error));
+      setActionMessage(null);
     }
   }
 
@@ -449,18 +410,18 @@ function App() {
     setSelectedCampaignId(campaignId);
   }
 
-
   return (
     <div className="app-shell">
       <header className="hero">
         <p className="eyebrow">Soroban crowdfunding MVP</p>
         <h1>Stellar Goal Vault</h1>
         <p className="hero-copy">
-          Create funding goals, collect pledges, and run contributor refunds through the real Soroban contract path.
+          Create funding goals, collect pledges, and reconcile claim and refund flows
+          against the backend contract integration.
         </p>
       </header>
 
-
+      <section className="metric-grid animate-fade-in">
         <article className="metric-card">
           <span>Total campaigns</span>
           <strong>{metrics.total}</strong>
@@ -472,6 +433,10 @@ function App() {
         <article className="metric-card">
           <span>Funded campaigns</span>
           <strong>{metrics.funded}</strong>
+        </article>
+        <article className="metric-card">
+          <span>Claimed campaigns</span>
+          <strong>{metrics.claimed}</strong>
         </article>
         <article className="metric-card">
           <span>Total pledged</span>
@@ -504,7 +469,19 @@ function App() {
         />
       </section>
 
+      <section className="secondary-grid">
+        <CampaignsTable
+          campaigns={campaigns}
+          selectedCampaignId={selectedCampaignId}
+          onSelect={handleSelect}
+          isLoading={isCampaignsLoading || initialLoad}
+          invalidUrlCampaignId={invalidUrlCampaignId}
+        />
+        <CampaignTimeline history={history} isLoading={isSelectedLoading || initialLoad} />
+      </section>
 
+      <section className="section-margin">
+        <IssueBacklog issues={issues} isLoading={isIssuesLoading} />
       </section>
     </div>
   );

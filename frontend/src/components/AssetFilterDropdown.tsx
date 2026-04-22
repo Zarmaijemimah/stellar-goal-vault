@@ -1,6 +1,6 @@
 export interface AssetFilterDropdownProps {
-  options: string[]; // sorted distinct asset codes
-  value: string; // "" = "All assets"
+  options: string[];
+  value: string;
   onChange: (value: string) => void;
   disabled?: boolean;
 }
@@ -29,7 +29,7 @@ export function AssetFilterDropdown({
         opacity: disabled ? 0.55 : 1,
       }}
     >
-      <option value="">All assets</option>
+      <option value="">All Assets</option>
       {options.map((code) => (
         <option key={code} value={code}>
           {code}

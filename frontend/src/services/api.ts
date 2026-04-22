@@ -5,6 +5,7 @@ import {
   CreateCampaignPayload,
   CreatePledgePayload,
   OpenIssue,
+  ReconcilePledgePayload,
   SorobanRefundMetadata,
 } from "../types/campaign";
 
@@ -27,8 +28,9 @@ async function parseResponse<T>(response: Response): Promise<T> {
     const error = new Error(errorMsg);
     if (body.error) {
       (error as Error & { code?: string }).code = body.error.code;
-      (error as Error & { details?: Array<{ field: string; message: string }> }).details =
-        body.error.details;
+      (
+        error as Error & { details?: Array<{ field: string; message: string }> }
+      ).details = body.error.details;
       (error as Error & { requestId?: string }).requestId = body.error.requestId;
     }
     throw error;
@@ -131,11 +133,5 @@ export async function getCampaignHistory(campaignId: string): Promise<CampaignEv
 export async function listOpenIssues(): Promise<OpenIssue[]> {
   const response = await fetch(`${API_BASE}/open-issues`);
   const body = await parseResponse<{ data: OpenIssue[] }>(response);
-  return body.data;
-}
-
-export async function getAppConfig(): Promise<AppConfig> {
-  const response = await fetch(`${API_BASE}/config`);
-  const body = await parseResponse<{ data: AppConfig }>(response);
   return body.data;
 }

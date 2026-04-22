@@ -7,7 +7,7 @@ interface IssueBacklogProps {
   isLoading?: boolean;
 }
 
-export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
+export function IssueBacklog({ issues, isLoading = false }: IssueBacklogProps) {
   if (isLoading) {
     return (
       <section className="card">
@@ -40,7 +40,25 @@ export function IssueBacklog({ issues, isLoading }: IssueBacklogProps) {
       </div>
 
       <div className="issue-list">
-
+        {issues.map((issue) => (
+          <article key={issue.id} className="issue-item">
+            <div className="issue-topline">
+              <strong>
+                #{issue.id} {issue.title}
+              </strong>
+              <span className="chip-emphasis">{issue.points} pts</span>
+            </div>
+            <p className="muted">{issue.summary}</p>
+            <div className="chip-row">
+              <span className="chip">{issue.complexity}</span>
+              {issue.labels.map((label) => (
+                <span key={label} className="chip">
+                  {label}
+                </span>
+              ))}
+            </div>
+          </article>
+        ))}
       </div>
     </section>
   );

@@ -1,15 +1,10 @@
-import { FormEvent, useState, useEffect } from "react";
-import { getAppConfig } from "../services/api";
-import { CreateCampaignPayload, ApiError } from "../types/campaign";
-import {
-  validateForm,
-  isFormValid,
-  FormErrors,
-} from "../utils/validation";
+import { FormEvent, useEffect, useState } from "react";
+import { ApiError, CreateCampaignPayload } from "../types/campaign";
+import { FormErrors, isFormValid, validateForm } from "../utils/validation";
 
 interface CreateCampaignFormProps {
   onCreate: (payload: CreateCampaignPayload) => Promise<void>;
-  allowedAssets: string[];
+  allowedAssets?: string[];
   apiError?: ApiError | null;
 }
 
@@ -26,52 +21,51 @@ const INITIAL_VALUES = {
 
 export function CreateCampaignForm({
   onCreate,
-  allowedAssets,
+  allowedAssets = [],
   apiError,
 }: CreateCampaignFormProps) {
-  const [values, setValues] = useState(INITIAL_VALUES);
+  const assetOptions = allowedAssets.length > 0 ? allowedAssets : ["USDC"];
+  const [values, setValues] = useState({
+    ...INITIAL_VALUES,
+    assetCode: assetOptions[0] ?? INITIAL_VALUES.assetCode,
+  });
+  const [validationErrors, setValidationErrors] = useState<FormErrors>(
+    validateForm(INITIAL_VALUES),
+  );
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-        }
-      })
-      .catch((error) => {
-        console.error("Failed to load config:", error);
-        setConfigError(error instanceof Error ? error.message : "Failed to load asset configuration");
-      });
-  }, []);
+  useEffect(() => {
+    setValues((current) => {
+      if (assetOptions.includes(current.assetCode)) {
+        return current;
+      }
+
+      return {
+        ...current,
+        assetCode: assetOptions[0] ?? INITIAL_VALUES.assetCode,
+      };
+    });
+  }, [assetOptions]);
 
   function update(field: keyof typeof INITIAL_VALUES, value: string) {
-    setValues((current) => ({ ...current, [field]: value }));
-
-    // Validate field on change for real-time feedback
-    if (
-      field === "creator" ||
-      field === "title" ||
-      field === "description" ||
-      field === "targetAmount" ||
-      field === "deadlineHours"
-    ) {
-      const updatedValues = { ...values, [field]: value };
-      const newErrors = validateForm(updatedValues);
-      setValidationErrors(newErrors);
-    }
+    const nextValues = { ...values, [field]: value };
+    setValues(nextValues);
+    setValidationErrors(validateForm(nextValues));
   }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    // Validate form before submission
     const errors = validateForm(values);
     setValidationErrors(errors);
-
     if (!isFormValid(errors)) {
       return;
     }
 
     setIsSubmitting(true);
-
     try {
       const deadline = Math.floor(Date.now() / 1000) + Number(values.deadlineHours) * 3600;
+
       await onCreate({
         creator: values.creator.trim(),
         title: values.title.trim(),
@@ -85,24 +79,24 @@ export function CreateCampaignForm({
         },
       });
 
-      setValues({
+      const resetValues = {
         ...INITIAL_VALUES,
-        assetCode: allowedAssets[0] ?? INITIAL_VALUES.assetCode,
-      });
-      setValidationErrors({});
+        assetCode: assetOptions[0] ?? INITIAL_VALUES.assetCode,
+      };
+      setValues(resetValues);
+      setValidationErrors(validateForm(resetValues));
     } finally {
       setIsSubmitting(false);
     }
   }
-
-  const assetOptions = allowedAssets.length > 0 ? allowedAssets : ["USDC"];
 
   return (
     <section className="card">
       <div className="section-heading">
         <h2>Create Campaign</h2>
         <p className="muted">
-          Spin up a Stellar goal vault for contributors and prototype the funding lifecycle.
+          Spin up a Stellar goal vault for contributors and prototype the funding
+          lifecycle.
         </p>
       </div>
 
@@ -226,12 +220,6 @@ export function CreateCampaignForm({
             />
           </label>
         </div>
-
-        {configError && (
-          <div className="form-error">
-            <p>⚠️ Asset Configuration: {configError}</p>
-          </div>
-        )}
 
         {apiError ? (
           <div className="form-error">

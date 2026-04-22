@@ -4,6 +4,7 @@ import { EmptyState } from "./EmptyState";
 
 interface CampaignTimelineProps {
   history: CampaignEvent[];
+  isLoading?: boolean;
 }
 
 function formatTimestamp(unixSeconds: number): string {
@@ -80,7 +81,7 @@ function getMetadataLines(event: CampaignEvent): string[] {
   return lines;
 }
 
-export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) {
+export function CampaignTimeline({ history, isLoading = false }: CampaignTimelineProps) {
   if (isLoading) {
     return (
       <section className="card">
@@ -108,7 +109,8 @@ export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) 
       <div className="section-heading">
         <h2>Timeline</h2>
         <p className="muted">
-          Local history is reconciled after successful contract actions so contributors can inspect refund metadata.
+          Local history is reconciled after successful contract actions so contributors
+          can inspect refund metadata.
         </p>
       </div>
 
@@ -117,8 +119,11 @@ export function CampaignTimeline({ history, isLoading }: CampaignTimelineProps) 
           const isPending = event.metadata?.pending === true;
           const metadataLines = getMetadataLines(event);
 
-
-            <article key={event.id} className={`timeline-item ${isPending ? "pending" : ""}`}>
+          return (
+            <article
+              key={event.id}
+              className={`timeline-item ${isPending ? "pending" : ""}`}
+            >
               <div className="timeline-dot" aria-hidden />
               <div className="timeline-copy">
                 <strong>

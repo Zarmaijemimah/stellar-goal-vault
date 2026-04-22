@@ -1,47 +1,54 @@
-import { FormEvent, useEffect, useState } from "react";
-
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { MousePointer2 } from "lucide-react";
+import { ApiError, AppConfig, Campaign } from "../types/campaign";
+import { ContributorSummary } from "./ContributorSummary";
+import { CopyButton } from "./CopyButton";
+import { EmptyState } from "./EmptyState";
 
 interface CampaignDetailPanelProps {
   campaign: Campaign | null;
+  appConfig?: AppConfig | null;
+  connectedWallet?: string | null;
+  isConnectingWallet?: boolean;
   isLoading?: boolean;
-
+  actionError?: ApiError | string | null;
   actionMessage?: string | null;
   isPledgePending?: boolean;
-  onConnectWallet: () => Promise<void>;
-  onPledge: (campaignId: string, amount: number) => Promise<void>;
-  onClaim: (campaign: Campaign) => Promise<void>;
-  onRefund: (campaignId: string, contributor: string) => Promise<void>;
+  onConnectWallet?: () => Promise<void>;
+  onPledge?: (campaignId: string, amount: number) => Promise<void>;
+  onClaim?: (campaign: Campaign) => Promise<void>;
+  onRefund?: (campaignId: string, contributor: string) => Promise<void>;
 }
 
-function networkName(config: AppConfig | null): string {
-  if (!config) {
-    return "network";
+function networkName(config: AppConfig | null | undefined): string {
+  const passphrase = config?.networkPassphrase ?? config?.soroban?.networkPassphrase;
+
+  if (!passphrase) {
+    return "Configured network";
   }
-  if (config.networkPassphrase === "Test SDF Network ; September 2015") {
+  if (passphrase === "Test SDF Network ; September 2015") {
     return "Stellar Testnet";
   }
-  if (
-    config.networkPassphrase ===
-    "Public Global Stellar Network ; September 2015"
-  ) {
+  if (passphrase === "Public Global Stellar Network ; September 2015") {
     return "Stellar Mainnet";
   }
+
   return "Configured network";
 }
 
 export function CampaignDetailPanel({
   campaign,
   appConfig,
-  connectedWallet,
+  connectedWallet = null,
   isConnectingWallet = false,
   isLoading = false,
   actionError,
   actionMessage,
   isPledgePending = false,
-  onConnectWallet,
-  onPledge,
-  onClaim,
-  onRefund,
+  onConnectWallet = async () => {},
+  onPledge = async () => {},
+  onClaim = async () => {},
+  onRefund = async () => {},
 }: CampaignDetailPanelProps) {
   const [pledgeAmount, setPledgeAmount] = useState("25");
   const [refundContributor, setRefundContributor] = useState("");
@@ -51,6 +58,18 @@ export function CampaignDetailPanel({
     setPledgeAmount("25");
     setRefundContributor(connectedWallet ?? "");
   }, [campaign?.id, connectedWallet]);
+
+  const normalizedActionError = useMemo(() => {
+    if (!actionError) {
+      return null;
+    }
+
+    return typeof actionError === "string" ? { message: actionError } : actionError;
+  }, [actionError]);
+
+  const walletReady = Boolean(
+    appConfig?.walletIntegrationReady ?? appConfig?.soroban?.enabled,
+  );
 
   if (isLoading) {
     return (
@@ -91,8 +110,6 @@ export function CampaignDetailPanel({
   }
 
   const activeCampaign = campaign;
-  const normalizedActionError =
-    typeof actionError === "string" ? ({ message: actionError } as ApiError) : actionError;
 
   async function handlePledge(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -129,17 +146,44 @@ export function CampaignDetailPanel({
         <p className="muted">{activeCampaign.description}</p>
       </div>
 
+      <div className="wallet-status">
+        <div>
+          <h3 className="wallet-status-title">Wallet status</h3>
+          <p className="muted">
+            {connectedWallet
+              ? `Connected to ${networkName(appConfig)}`
+              : `Connect Freighter for ${networkName(appConfig)}`}
+          </p>
+        </div>
+        <div className="wallet-connected">
+          {connectedWallet ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <strong className="mono">{connectedWallet.slice(0, 16)}...</strong>
+              <CopyButton
+                value={connectedWallet}
+                ariaLabel="Copy connected wallet address"
+              />
+            </div>
+          ) : null}
+          <button
+            className="btn-ghost"
+            type="button"
+            onClick={() => {
+              void onConnectWallet();
+            }}
+            disabled={isSubmitting || isConnectingWallet}
+          >
+            {isConnectingWallet ? "Connecting..." : "Connect Freighter"}
+          </button>
+        </div>
+      </div>
+
       <div className="detail-grid">
         <article className="detail-stat">
           <span>Creator</span>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-            <strong className="mono">
-              {activeCampaign.creator.slice(0, 16)}...
-            </strong>
-            <CopyButton
-              value={activeCampaign.creator}
-              ariaLabel="Copy creator address"
-            />
+            <strong className="mono">{activeCampaign.creator.slice(0, 16)}...</strong>
+            <CopyButton value={activeCampaign.creator} ariaLabel="Copy creator address" />
           </div>
         </article>
         <article className="detail-stat">
@@ -156,12 +200,18 @@ export function CampaignDetailPanel({
         </article>
       </div>
 
-
       <ContributorSummary
         pledges={activeCampaign.pledges}
         assetCode={activeCampaign.assetCode}
         isLoading={isLoading}
       />
+
+      {!walletReady ? (
+        <p className="pending-note">
+          Wallet integration is not fully configured yet. Freighter actions that
+          require Soroban contract calls may stay disabled until backend config is set.
+        </p>
+      ) : null}
 
       <form className="form-grid" onSubmit={handlePledge}>
         <label className="field-group">
@@ -194,20 +244,25 @@ export function CampaignDetailPanel({
               isSubmitting ||
               isPledgePending ||
               !activeCampaign.progress.canPledge ||
-              !connectedWallet ||
-              !walletReady
+              !connectedWallet
             }
           >
-            {isPledgePending
-              ? "Simulating / waiting..."
-              : "Sign pledge with Freighter"}
+            {isPledgePending ? "Submitting..." : "Add pledge"}
           </button>
 
           <button
             className="btn-ghost"
             type="button"
-            disabled={isSubmitting || !activeCampaign.progress.canClaim}
-            onClick={handleClaim}
+            disabled={
+              isSubmitting ||
+              !activeCampaign.progress.canClaim ||
+              !connectedWallet ||
+              connectedWallet !== activeCampaign.creator ||
+              !walletReady
+            }
+            onClick={() => {
+              void handleClaim();
+            }}
           >
             Claim vault
           </button>
@@ -232,9 +287,11 @@ export function CampaignDetailPanel({
             disabled={
               isSubmitting ||
               !activeCampaign.progress.canRefund ||
-              contributor.trim().length === 0
+              refundContributor.trim().length === 0
             }
-            onClick={handleRefund}
+            onClick={() => {
+              void handleRefund();
+            }}
           >
             Refund contributor
           </button>
@@ -243,23 +300,26 @@ export function CampaignDetailPanel({
 
       {isPledgePending ? (
         <p className="pending-note">
-          The pledge transaction is in flight. The local campaign state will
-          refresh after the Soroban transaction confirms.
+          The pledge transaction is in flight. Campaign state will refresh after
+          the backend reconciles the result.
         </p>
       ) : null}
+
       {normalizedActionError ? (
         <div className="form-error">
           <p>{normalizedActionError.message}</p>
-          {normalizedActionError.code && (
+          {normalizedActionError.code ? (
             <small className="error-meta">
               Code: {normalizedActionError.code}
-              {normalizedActionError.requestId && ` | Request ID: ${normalizedActionError.requestId}`}
+              {normalizedActionError.requestId
+                ? ` | Request ID: ${normalizedActionError.requestId}`
+                : ""}
             </small>
           ) : null}
         </div>
-      )}
+      ) : null}
 
-      {actionMessage && <p className="form-success">{actionMessage}</p>}
+      {actionMessage ? <p className="form-success">{actionMessage}</p> : null}
 
       {activeCampaign.metadata?.imageUrl ? (
         <div className="campaign-image-container">

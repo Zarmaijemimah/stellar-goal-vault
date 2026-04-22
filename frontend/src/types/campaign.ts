@@ -81,16 +81,6 @@ export interface RefundReconciliationPayload {
   soroban: SorobanRefundMetadata;
 }
 
-export interface AppConfig {
-  allowedAssets: string[];
-  soroban: {
-    enabled: boolean;
-    contractId?: string;
-    networkPassphrase: string;
-    rpcUrl: string;
-  };
-}
-
 export interface CreateCampaignPayload {
   creator: string;
   title: string;
@@ -116,6 +106,12 @@ export interface ReconcilePledgePayload extends CreatePledgePayload {
 
 export interface AppConfig {
   allowedAssets: string[];
+  soroban: {
+    enabled: boolean;
+    contractId?: string;
+    networkPassphrase: string;
+    rpcUrl: string;
+  };
   sorobanRpcUrl: string;
   contractId: string;
   networkPassphrase: string;
